@@ -13,7 +13,7 @@
 	  5. Бесконечная выносливость игрока (в том числе во время полёта)
 
 	Меню: кнопка слева (её можно перетаскивать) или RightShift.
-	Полёт: кнопка FLY слева (тоже перетаскивается) или клавиша F.
+	Полёт: переключатель в меню или клавиша F.
 	Повторный запуск безопасен — старая копия выгружается автоматически.
 	Кнопка «Выгрузить скрипт» полностью удаляет панель и возвращает скорость.
 ]]
@@ -822,6 +822,16 @@ local function headerButton(text, xOffset)
 end
 local closeBtn = headerButton("X", -12)
 local collapseBtn = headerButton("-", -48)
+new("Frame", {
+	Position = UDim2.new(0, 14, 1, -2),
+	Size = UDim2.new(1, -28, 0, 2),
+	BackgroundColor3 = C.accent,
+	BorderSizePixel = 0,
+	Parent = header,
+}, {
+	corner(1),
+	new("UIGradient", { Color = ColorSequence.new(C.accent, C.on) }),
+})
 
 local content = new("ScrollingFrame", {
 	Name = "Content",
@@ -839,11 +849,43 @@ local content = new("ScrollingFrame", {
 	new("UIPadding", { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6) }),
 })
 
+-- Живая информация (обновляется в цикле статуса)
+local infoCard = new("Frame", {
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundColor3 = C.card,
+	LayoutOrder = 0,
+	Parent = content,
+}, {
+	corner(12),
+	new("UIStroke", { Color = C.stroke, Thickness = 1 }),
+	new("UIPadding", {
+		PaddingTop = UDim.new(0, 10),
+		PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+	}),
+})
+local liveLabel = new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	Text = "Загрузка…",
+	TextColor3 = C.text,
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextWrapped = true,
+	RichText = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Parent = infoCard,
+})
+
 -- Карточка функции
 local function createCard(opts)
 	local api = {}
 	local isOn = false
 	local currentValue
+	local cardStroke = new("UIStroke", { Color = C.stroke, Thickness = 1 })
 
 	local card = new("Frame", {
 		Size = UDim2.new(1, 0, 0, 0),
@@ -853,6 +895,7 @@ local function createCard(opts)
 		Parent = content,
 	}, {
 		corner(12),
+		cardStroke,
 		new("UIPadding", {
 			PaddingTop = UDim.new(0, 12),
 			PaddingBottom = UDim.new(0, 12),
@@ -924,6 +967,7 @@ local function createCard(opts)
 		status.Text = isOn and "ON" or "OFF"
 		tween(status, { TextColor3 = isOn and C.on or C.sub })
 		tween(pill, { BackgroundColor3 = isOn and C.on or C.off })
+		tween(cardStroke, { Color = isOn and C.on or C.stroke })
 		tween(knob, { Position = isOn and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) })
 		if not silent and opts.onToggle then
 			opts.onToggle(isOn)
@@ -1031,6 +1075,37 @@ local function createCard(opts)
 		end)
 
 		api.setValue(s.default, true)
+
+		if s.presets then
+			local row = new("Frame", {
+				Size = UDim2.new(1, 0, 0, 26),
+				BackgroundTransparency = 1,
+				LayoutOrder = 4,
+				Parent = card,
+			}, {
+				new("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					Padding = UDim.new(0, 6),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+			})
+			for i, v in ipairs(s.presets) do
+				local chip = new("TextButton", {
+					Size = UDim2.fromOffset(48, 26),
+					BackgroundColor3 = C.bg,
+					Text = tostring(v),
+					TextColor3 = C.text,
+					Font = Enum.Font.GothamBold,
+					TextSize = 12,
+					LayoutOrder = i,
+					AutoButtonColor = true,
+					Parent = row,
+				}, { corner(8) })
+				chip.Activated:Connect(function()
+					api.setValue(v)
+				end)
+			end
+		end
 	end
 
 	return api
@@ -1040,7 +1115,7 @@ local walkCard = createCard({
 	order = 1,
 	title = "Скорость передвижения",
 	desc = "Меняет скорость бега персонажа.",
-	slider = { label = "Скорость", min = CONFIG.Walk.Min, max = CONFIG.Walk.Max, default = CONFIG.Walk.Default },
+	slider = { label = "Скорость", min = CONFIG.Walk.Min, max = CONFIG.Walk.Max, default = CONFIG.Walk.Default, presets = { 16, 50, 100, 200, 300 } },
 	onToggle = function(on) State.Walk.On = on end,
 	onValue = function(v) State.Walk.Value = v end,
 })
@@ -1049,7 +1124,7 @@ local petCard = createCard({
 	order = 2,
 	title = "Скорость на питомце",
 	desc = "Действует, пока вы едете на питомце.",
-	slider = { label = "Скорость", min = CONFIG.Pet.Min, max = CONFIG.Pet.Max, default = CONFIG.Pet.Default },
+	slider = { label = "Скорость", min = CONFIG.Pet.Min, max = CONFIG.Pet.Max, default = CONFIG.Pet.Default, presets = { 40, 80, 150, 250, 400 } },
 	onToggle = function(on) State.Pet.On = on end,
 	onValue = function(v) State.Pet.Value = v end,
 })
@@ -1064,12 +1139,12 @@ local petStaminaCard = createCard({
 	end,
 })
 
-local flyPad, flyQuick -- кнопки ▲▼ и быстрая кнопка FLY (создаются ниже)
+local flyPad, flyQuick -- кнопки ▲▼ для телефона (создаются ниже)
 local flyCard = createCard({
 	order = 4,
 	title = "Полёт",
 	desc = "WASD / джойстик — по направлению камеры. Пробел или E — вверх, Ctrl или Q — вниз. Клавиша F — вкл/выкл.",
-	slider = { label = "Скорость полёта", min = CONFIG.Fly.Min, max = CONFIG.Fly.Max, default = CONFIG.Fly.Default },
+	slider = { label = "Скорость полёта", min = CONFIG.Fly.Min, max = CONFIG.Fly.Max, default = CONFIG.Fly.Default, presets = { 30, 80, 150, 300, 500 } },
 	onToggle = function(on)
 		State.Fly.On = on
 		if flyQuick then
@@ -1179,12 +1254,12 @@ padButton("▼", 70, "downTouch")
 local fab = new("TextButton", {
 	Name = "MenuButton",
 	Position = UDim2.new(0, 12, 0.5, -22),
-	Size = UDim2.fromOffset(44, 44),
-	BackgroundColor3 = C.accent,
+	Size = UDim2.fromOffset(46, 46),
+	BackgroundColor3 = Color3.fromRGB(10, 10, 12),
 	Text = "",
 	AutoButtonColor = true,
 	Parent = gui,
-}, { corner(22) })
+}, { corner(23), new("UIStroke", { Color = C.stroke, Thickness = 1.5 }) })
 for i = 0, 2 do
 	new("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -1195,19 +1270,6 @@ for i = 0, 2 do
 		Parent = fab,
 	}, { corner(1) })
 end
-
-flyQuick = new("TextButton", {
-	Name = "FlyButton",
-	Position = UDim2.new(0, 12, 0.5, 30),
-	Size = UDim2.fromOffset(44, 44),
-	BackgroundColor3 = C.accent,
-	Text = "FLY",
-	TextColor3 = C.white,
-	Font = Enum.Font.GothamBold,
-	TextSize = 12,
-	AutoButtonColor = true,
-	Parent = gui,
-}, { corner(22) })
 
 -- Перетаскивание окна
 do
@@ -1279,9 +1341,6 @@ end
 makeDraggable(fab, function()
 	main.Visible = not main.Visible
 end)
-makeDraggable(flyQuick, function()
-	flyCard.setOn(not flyCard.isOn())
-end)
 
 local camConn
 local function updateScale()
@@ -1350,6 +1409,25 @@ task.spawn(function()
 			statusLabel.Text = "Питомец: не найден"
 			statusLabel.TextColor3 = C.sub
 		end
+		local rootNow = getRoot()
+		local humNow = getHumanoid()
+		local flatSpeed = 0
+		if rootNow then
+			local vel = rootNow.AssemblyLinearVelocity
+			flatSpeed = Vector3.new(vel.X, 0, vel.Z).Magnitude
+		end
+		local modes = (State.Walk.On and "ходьба " or "")
+			.. (State.Pet.On and "питомец " or "")
+			.. (State.Stamina.On and "выносл. " or "")
+			.. (State.PetStamina.On and "выносл.питомца" or "")
+		if modes == "" then
+			modes = "—"
+		end
+		liveLabel.Text = string.format(
+			"<b>Скорость сейчас:</b> %.0f ст/с  |  <b>WalkSpeed:</b> %.0f\n<b>Питомец:</b> %s\n<b>Полёт:</b> %s  |  <b>Включено:</b> %s",
+			flatSpeed, humNow and humNow.WalkSpeed or 0, mount and mount.Name or "не найден",
+			State.Fly.On and "вкл" or "выкл", modes
+		)
 		debugLabel.Text = string.format(
 			"Ввод полёта: %s (x %.2f, z %.2f) | controls: %s | питомец: %s",
 			Debug.src, Debug.x, Debug.z, controls and "да" or "нет", mount and mount.Name or "нет"
@@ -1409,7 +1487,7 @@ if CONFIG.Notify then
 	pcall(function()
 		StarterGui:SetCore("SendNotification", {
 			Title = "Панель управления",
-			Text = "Загружено! Меню и полёт — кнопки слева.",
+			Text = "Загружено! Меню — чёрная кнопка слева.",
 			Duration = 5,
 		})
 	end)
