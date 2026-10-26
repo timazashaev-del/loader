@@ -66,7 +66,7 @@ local CONFIG = {
 	-- Эти слова в имени/пути значат, что выносливость относится к питомцу.
 	PetKeywords = { "pet", "mount", "horse", "питом", "Питом", "конь", "Конь", "ездов", "Ездов" },
 	-- Слова, которые НЕ считаются выносливостью (максимум, регенерация и т.п.).
-	StaminaExclude = { "max", "regen", "drain", "cost", "rate", "delay", "cooldown", "consum", "speed" },
+	StaminaExclude = { "max", "regen", "drain", "cost", "rate", "delay", "cooldown", "consum", "speed", "stamp" },
 	-- Атрибуты скорости питомца (если игра хранит скорость в атрибутах).
 	SpeedAttributes = { "Speed", "WalkSpeed", "MoveSpeed", "RunSpeed", "MountSpeed", "PetSpeed" },
 
@@ -297,6 +297,36 @@ local function getPetSpeedTargets(mount)
 	return speedCache.list
 end
 
+-- Запасной способ для питомца: если игра двигает его физикой, задаём
+-- горизонтальную скорость сборки (только пока есть ввод движения).
+local function boostAssembly(part)
+	if not part or part.Anchored then
+		return
+	end
+	local v = part.AssemblyLinearVelocity
+	local flat = Vector3.new(v.X, 0, v.Z)
+	if flat.Magnitude > 2 then
+		local d = flat.Unit * State.Pet.Value
+		part.AssemblyLinearVelocity = Vector3.new(d.X, v.Y, d.Z)
+	end
+end
+
+local function boostMount(mount)
+	if State.Fly.On then
+		return
+	end
+	local hum = getHumanoid()
+	local root = getRoot()
+	if not (hum and root) or hum.MoveDirection.Magnitude < 0.05 then
+		return
+	end
+	boostAssembly(root)
+	local pp = mount.PrimaryPart
+	if pp and pp.AssemblyRootPart ~= root.AssemblyRootPart then
+		boostAssembly(pp)
+	end
+end
+
 local function applySpeeds()
 	local hum = getHumanoid()
 	if hum and hum.Health > 0 then
@@ -308,6 +338,7 @@ local function applySpeeds()
 					force(t[1], t[2], State.Pet.Value)
 				end
 			end
+			boostMount(mount)
 		elseif State.Walk.On then
 			force(hum, "WalkSpeed", State.Walk.Value)
 		end
@@ -499,26 +530,64 @@ local controls = nil
 task.spawn(function()
 	local ps = player:WaitForChild("PlayerScripts", 15)
 	local pm = ps and ps:WaitForChild("PlayerModule", 15)
-	if pm then
-		local ok, module = pcall(require, pm)
-		if ok and module then
-			local ok2, c = pcall(function()
-				return module:GetControls()
-			end)
-			if ok2 then
-				controls = c
-			end
+	if not pm then
+		return
+	end
+	local ok, module = pcall(require, pm)
+	if ok and type(module) == "table" then
+		local ok2, c = pcall(function()
+			return module:GetControls()
+		end)
+		if ok2 and c then
+			controls = c
+			return
+		end
+	end
+	local cm = pm:FindFirstChild("ControlModule")
+	if cm then
+		local ok3, c3 = pcall(require, cm)
+		if ok3 and type(c3) == "table" and c3.GetMoveVector then
+			controls = c3
 		end
 	end
 end)
 
+local Debug = { src = "нет", x = 0, z = 0 }
+
+local function flatUnit(v)
+	local f = Vector3.new(v.X, 0, v.Z)
+	if f.Magnitude > 0.001 then
+		return f.Unit
+	end
+	return nil
+end
+
+-- Ввод относительно камеры: X — вправо, Z — назад (вперёд = -Z).
+-- Источники по порядку: штатные контролы -> Humanoid.MoveDirection -> клавиатура.
 local function getMoveVector()
 	if controls then
 		local ok, v = pcall(controls.GetMoveVector, controls)
-		if ok and typeof(v) == "Vector3" then
+		if ok and typeof(v) == "Vector3" and (math.abs(v.X) > 0.01 or math.abs(v.Z) > 0.01) then
+			Debug.src = "controls"
 			return v
 		end
 	end
+
+	local hum = getHumanoid()
+	local cam = Workspace.CurrentCamera
+	if hum and cam then
+		local md = hum.MoveDirection
+		if md.Magnitude > 0.05 then
+			local cf = cam.CFrame
+			local fwd = flatUnit(cf.LookVector) or flatUnit(cf.UpVector)
+			local rgt = flatUnit(cf.RightVector)
+			if fwd and rgt then
+				Debug.src = "humanoid"
+				return Vector3.new(md:Dot(rgt), 0, -md:Dot(fwd))
+			end
+		end
+	end
+
 	local x, z = 0, 0
 	if UserInputService:GetFocusedTextBox() == nil then
 		if UserInputService:IsKeyDown(Enum.KeyCode.W) then z -= 1 end
@@ -526,6 +595,7 @@ local function getMoveVector()
 		if UserInputService:IsKeyDown(Enum.KeyCode.A) then x -= 1 end
 		if UserInputService:IsKeyDown(Enum.KeyCode.D) then x += 1 end
 	end
+	Debug.src = (x ~= 0 or z ~= 0) and "клавиши" or "нет"
 	return Vector3.new(x, 0, z)
 end
 
@@ -605,6 +675,7 @@ local function updateFly(dt)
 	Fly.ao.Enabled = not mounted
 
 	local mv = getMoveVector()
+	Debug.x, Debug.z = mv.X, mv.Z
 	local cf = cam.CFrame
 	local dir = cf.RightVector * mv.X + cf.LookVector * (-mv.Z)
 
@@ -1046,6 +1117,20 @@ offAll.Activated:Connect(function()
 	end
 end)
 
+local debugLabel = new("TextLabel", {
+	Size = UDim2.new(1, 0, 0, 0),
+	AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1,
+	Text = "Диагностика…",
+	TextColor3 = C.sub,
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	LayoutOrder = 8,
+	Parent = content,
+})
+
 local unloadBtn = bottomButton("Выгрузить скрипт", 7, C.danger)
 unloadBtn.Activated:Connect(function()
 	if Unload then
@@ -1265,6 +1350,10 @@ task.spawn(function()
 			statusLabel.Text = "Питомец: не найден"
 			statusLabel.TextColor3 = C.sub
 		end
+		debugLabel.Text = string.format(
+			"Ввод полёта: %s (x %.2f, z %.2f) | controls: %s | питомец: %s",
+			Debug.src, Debug.x, Debug.z, controls and "да" or "нет", mount and mount.Name or "нет"
+		)
 		task.wait(0.3)
 	end
 end)
